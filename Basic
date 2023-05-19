@@ -1,0 +1,72 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+__global__ void MatrixM(float* A,float* B,float* C,int h,int s,int w)
+{
+    int row=blockIdx.y*blockDim.y+threadIdx.y;
+    int col=blockIdx.x*blockDim.x+threadIdx.x;
+
+    if (row<h && col<s) {
+        float cvalue=0;
+        for (int k=0;k<w;k++) {
+            cvalue+= A[row*width+k]*B[k*depth+col];
+        }
+        C[row*depth+col]=cvalue;
+    }
+}
+
+int main() {
+    int prow=1024;
+    int comm=512; 
+    int pcol=2048; 
+
+    float *hostA=(float*)malloc(sizeof(float)*comm*prow);
+    float *hostB=(float*)malloc(sizeof(float)*comm*pcol);
+    float *hostC=(float*)malloc(sizeof(float)*prow*pcol);
+
+    srand(time(NULL));
+    for (int i=0;i<comm*prow;i++) {
+        hostA[i]=rand()/(float)RAND_MAX;
+    }
+    for (int i=0;i<comm*pcol;i++) {
+        hostB[i]=rand()/(float)RAND_MAX;
+    }
+
+    float *deviceC,*deviceA,*deviceB;
+    cudaMalloc((void**)&deviceC,prow*pcol*sizeof(float));
+    cudaMalloc((void**)&deviceA,comm*prow*sizeof(float));
+    cudaMalloc((void**)&deviceB,comm*pcol*sizeof(float));
+ 
+    cudaMemcpy(deviceA,hostA,comm*prow*sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceB,hostB,comm*pcol*sizeof(float),cudaMemcpyHostToDevice);
+ 
+    dim3 threads(16, 16);
+    dim3 blocknum(ceil(pcol/(float)16),ceil(prow/(float)16));
+    
+    cudaEvent_t start, stop;
+    float time;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
+
+    MatrixM<<<blocknum,threads>>>(deviceA,deviceB,deviceC,prow,pcol,comm);
+
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&time, start, stop);
+
+    cudaMemcpy(hostC,deviceC,prow*pcol*sizeof(float),cudaMemcpyDeviceToHost);
+
+    printf("Time: %f ms\n",time);
+
+    cudaFree(deviceC);
+    cudaFree(deviceA);
+    cudaFree(deviceB);
+
+    free(hostC);
+    free(hostB);
+    free(hostA);
+    return 0;
+}
+
